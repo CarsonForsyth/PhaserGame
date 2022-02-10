@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0-beta.4/phaser-arcade-physics.js"></script>
+</head>
+<body>
+    <div id='div'>
+    <script>
+    const gameState = {}
+    const HEIGHT = 600;
+    const WIDTH = 800;
+    const SHIP_ACCELERATION = 20
+    const SHIP_DRAG = .8
+    const SHIP_MAX_VELOCITY = 200
+    const SHOT_VELOCITY = 150
+    const COMET_VELOCITY = 80
+    gameState.round_number = 1
+
+    // Starting scene for game.
+    let StartGameScene = new Phaser.Class({
+        Extends: Phaser.Scene,
+        initialize: function() {
+            Phaser.Scene.call(this, { "key": "StartGameScene" });
+        },
+        init: function(data) {},
+        preload: function() {},
+        create: function() {
+            this.add.text(
+                HEIGHT/2, 
+                WIDTH/2, 
+                'Welcome to Orbit Odyssey', 
+                {
+                    fontSize: 18,
+                    color: "#0000FF",
+                    fontStyle: "bold"
+                }
+            );
+            const play_again_button = this.add.text(WIDTH/2, HEIGHT - 100, 'PLAY GAME', { fill: '#0f0' });
+            play_again_button.setInteractive();
+            play_again_button.on('pointerdown', function () {
+                gameState.round_number = 1
+                game.scene.stop('StartGameScene')
+                game.scene.start("InGameScene")
+            })
+        },
+        update: function() {}
+    });
+
+    // Actual game scene.
+    let InGameScene = new Phaser.Class({
+        Extends: Phaser.Scene,
+        initialize: function() {
+            Phaser.Scene.call(this, { "key": "InGameScene" });
+        },
+        init: function(data) {
+        },
+        preload: function() {
+            this.load.image('ship', '/Comets/ship.png')
+            this.load.image('laser', '/Comets/laser.png')
+            this.load.image('comet', '/Comets/comet.png')
+        },
+        create: function() {
+            // Check if sprites hit world border. Game over if comet hits. Delete shot on bounds.
+            function onWorldBounds(body) {
+                if (body.gameObject.key == 'comet') {
+                    body.gameObject.destroy()
+                    gameState.game_lost = true
+                }
+                else if (body.gameObject.key = 'shot') {
+                    body.gameObject.destroy()
+                }
+            }
+
+            // Function called on collision from shot to comet
+            function destroyComet (comet, shot) {
+                comet.destroy()
+                shot.destroy()
+            }
+
+            // Game lost if comet hits ship. Update catches change to game_lost.
+            function shipHit (comet, ship) {
+                gameState.game_lost = true
+            }
+
+            // Update velocity each 100 ms to reduce ship speed.
+            function drag() {
+                gameState.ship.body.velocity.x = SHIP_DRAG*gameState.ship.body.velocity.x
+                gameState.ship.body.velocity.y = SHIP_DRAG*gameState.ship.body.velocity.y
+            }
+            let dragTimer = this.time.addEvent({
+                delay: 100,                // ms
+                callback: drag,
+                loop: true
+            });
+
+            gameState.game_lost = false
+            gameState.next_shot = 0
+            gameState.keys = this.input.keyboard.addKeys('W,S,A,D,SPACE');
+
+            // Setup for main sprite, the ship that is controlled by player.
+            gameState.ship = this.physics.add.sprite(WIDTH/2, HEIGHT, 'ship')
+            gameState.ship.setScale(.075);
+            gameState.ship.body.setBounce(1, 1);
+            gameState.ship.body.setCollideWorldBounds(true);
+            gameState.ship.body.setMaxVelocity(SHIP_MAX_VELOCITY)
+            gameState.ship.body.setVelocity(0, SHIP_MAX_VELOCITY);
+
+            // Set up physics group for comets and populate with the current level number of comets.
+            gameState.comets = this.physics.add.group({key: 'comet'})
+            gameState.comets.onWorldBounds = true
+            gameState.shots = this.physics.add.group({key: 'shot'})
+            for (let i = 0; i < gameState.round_number; i ++) {
+                let comet = gameState.comets.create((Math.random() * (WIDTH-600) + 300), 100, 'comet')
+                comet.setScale(Math.random() * .2 + .2)
+                comet.angle = Math.random() * 360
+                comet.setVelocity(0, Math.random()*COMET_VELOCITY + COMET_VELOCITY)
+                comet.key = 'comet'
+                comet.onCollide = true
+                comet.setCollideWorldBounds(true)
+                comet.body.onWorldBounds = true
+            }
+            this.physics.add.collider(gameState.comets, gameState.shots, destroyComet)
+            this.physics.add.collider(gameState.comets, gameState.ship, shipHit)
+            this.physics.world.on('worldbounds', onWorldBounds);
+        },
+        update: function() {
+            // First check if round is finished and go to proper scene.
+            if (gameState.game_lost == true) {
+                    this.scene.start("GameOverScene");
+            }
+            else if (gameState.comets.children.entries.length == 0) {
+                this.scene.start("RoundWonScene");
+            }
+            if (gameState.keys.A.isDown) {
+                gameState.ship.setVelocity(gameState.ship.body.velocity.x-SHIP_ACCELERATION, gameState.ship.body.velocity.y)
+            }
+            if (gameState.keys.D.isDown) {
+                gameState.ship.setVelocity(gameState.ship.body.velocity.x+SHIP_ACCELERATION, gameState.ship.body.velocity.y)
+            }
+            if (gameState.keys.W.isDown) {
+                gameState.ship.setVelocity(gameState.ship.body.velocity.x, gameState.ship.body.velocity.y-SHIP_ACCELERATION)
+            }
+            if (gameState.keys.S.isDown) {
+                gameState.ship.setVelocity(gameState.ship.body.velocity.x, gameState.ship.body.velocity.y+SHIP_ACCELERATION)
+            }
+            if (gameState.keys.SPACE.isDown) {
+                // When space pressed, fire a shot every 400 ms.
+                if (this.time.now > gameState.next_shot ) {
+                    let shot = gameState.shots.create(gameState.ship.x, gameState.ship.y, 'laser')
+                    shot.setVelocity(0, -SHOT_VELOCITY)
+                    shot.body.onWorldBounds = true
+                    shot.key = 'shot'
+                    shot.onCollide = true
+                    shot.setScale(.1)
+                    shot.body.setCollideWorldBounds(true)
+                    gameState.next_shot = this.time.now + 400;
+                }
+            }
+        }
+    });
+
+    // Scene called when all comets are destroyed.
+    let RoundWonScene = new Phaser.Class({
+        Extends: Phaser.Scene,
+        initialize: function() {
+            Phaser.Scene.call(this, { "key": "RoundWonScene" });
+        },
+        init: function(data) {},
+        preload: function() {},
+        create: function() {
+            this.add.text(
+                WIDTH/2, 
+                HEIGHT-200, 
+                `Completed Round ${gameState.round_number}!`, 
+                {
+                    fontSize: 20,
+                    color: "#0000FF",
+                    fontStyle: "bold"
+                }
+            );
+            const play_again_button = this.add.text(WIDTH/2, HEIGHT - 100, 'NEXT ROUND', { fill: '#0f0' });
+            play_again_button.setInteractive();
+
+            play_again_button.on('pointerdown', function () {
+                gameState.round_number += 1
+                game.scene.stop('RoundWonScene')
+                game.scene.start("InGameScene")
+            })
+        },
+        update: function() {}
+    });
+
+    // Scene called when comet hits ship or comet reaches bottom.
+    let GameOverScene = new Phaser.Class({
+        Extends: Phaser.Scene,
+        initialize: function() {
+            Phaser.Scene.call(this, { "key": "GameOverScene" });
+        },
+        init: function(data) {},
+        preload: function() {},
+        create: function() {
+            this.add.text(
+                HEIGHT/2, 
+                WIDTH/2, 
+                `You lost on round ${gameState.round_number}`, 
+                {
+                    fontSize: 18,
+                    color: "#0000FF",
+                    fontStyle: "bold"
+                }
+            );
+            const play_again_button = this.add.text(WIDTH/2, HEIGHT - 100, 'PLAY AGAIN', { fill: '#0f0' });
+            play_again_button.setInteractive();
+            play_again_button.on('pointerdown', function () {
+                gameState.round_number = 1
+                game.scene.stop('GameOverScene')
+                game.scene.start("InGameScene")
+            })
+        },
+        update: function() {}
+    });
+    
+    let config = {
+        type: Phaser.AUTO,
+        width: WIDTH,
+        height: HEIGHT,
+        physics: {
+            default: 'arcade',
+            arcade: {
+                debug: false,
+                gravity: { y: 0 }
+            }
+        },
+        scene: [StartGameScene, InGameScene, RoundWonScene, GameOverScene]
+    };
+
+    let game = new Phaser.Game(config)
+    </script>
+    </div>
+</body>
+</html>
